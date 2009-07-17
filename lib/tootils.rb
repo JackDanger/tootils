@@ -8,6 +8,10 @@ require 'httparty'
 require 'pp'
 config = YAML::load(File.read(File.join(ENV['HOME'], '.twitter')))
 
+Dir.glob(File.join(File.dirname(__FILE__), 'tools', '*.rb')).each do |tool_file|
+  require tool_file
+end
+
 class Tootils
   include HTTParty
   base_uri 'twitter.com'
@@ -70,58 +74,11 @@ class Tootils
     end
     false # if no one in list1 is in list2
   end
-  
-  # Our first twitter tool: Graphing connections from the first user to the second.
-  # This will check the first 3 degrees for links, and return a hash of connections
-  # found in each degree.
-  # Once any degree has a connection in it, additional degrees are not checked.
-  def graph(twit1, twit2)
-    twit1_id = info(twit1)['id']
-    twit1_friends = friends(twit1)
-    twit2_id = info(twit2)['id']
-    twit2_followers = followers(twit2)
-    # Start assuming there are no connections
-    graph = { 1 => [], 2 => [], 3 => [] }
-    
-    if twit2_followers.include?(twit1_id)
-      graph[1] = [[twit1_id, twit2_id]]
-    end
-    
-    return graph unless graph[1].empty?
-    
-    # Check second degree: Are there friends of twit1 who follow twit2? 
-    # Get an array of all connections.
-    for friend in (twit1_friends & twit2_followers)
-      graph[2] << [twit1_id, friend, twit2_id]
-    end
-    return graph unless graph[2].empty?
-    
-    # Check the 3rd degree: This is the real API hit.
-    # We need to check friends of friends, or the followers of followers,
-    # which ever is fewer
-    if twit1_friends.length < twit2_followers.length
-      for friend in twit1_friends
-        friends_of_friend = friends(friend)
-        deg3 = friends_of_friend & twit2_followers
-        # Add a connection for each friend of a friend who is a follower of twit2
-        for fof in deg3
-          graph[3] << [twit1_id, friend, fof, twit2_id]
-        end
-      end
-    else
-      for follower in twit2_followers
-        followers_of_follower = followers(follower)
-        deg3 = twit1_friends & followers_of_follower
-        # Add a connection for each follower of a follower who is a friend of twit1
-        for fof in deg3
-          graph[3] << [twit1_id, fof, follower, twit2_id]
-        end rescue pp "Can't get followers for #{follower}: #{info(follower)}"
-      end
-    end
-    return graph
+
+  def graph(*users)
+    Tootils::Graph.new(self, *users)
   end
-    
-  
+
 end
 
 
@@ -154,8 +111,8 @@ start_limit = Tootils.remaining_hits
 pp "User #{ARGV[0]} (id: #{tools.info(ARGV[0])['id']}) has #{tools.friends(ARGV[0]).length} friends." unless ARGV[0].nil?
 
 unless( ARGV[0].nil? or ARGV[1].nil? )
-  pp tools.graph(ARGV[0], ARGV[1])
-  for deg, links in tools.graph(ARGV[0], ARGV[1])
+  pp tools.graph(ARGV[0], ARGV[1]).process
+  for deg, links in tools.graph(ARGV[0], ARGV[1]).process
     for link in links
       puts link.map{ |id| tools.info(id)['screen_name'] }.join(' -> ')
     end
